@@ -169,8 +169,8 @@ class OpenNIOrganizedMultiPlaneSegmentation
                         {
                             Eigen::Vector3f centroid = regions[i].getCentroid ();
                             Eigen::Vector4f model = regions[i].getCoefficients ();
-                            pcl::PointXYZ pt1 = pcl::PointXYZ (centroid[0], centroid[1], centroid[2]);
-                            pcl::PointXYZ pt2 = pcl::PointXYZ (centroid[0] + (0.5f * model[0]),
+                            pcl::PointXYZRGB pt1 = pcl::PointXYZRGB (centroid[0], centroid[1], centroid[2]);
+                            pcl::PointXYZRGB pt2 = pcl::PointXYZRGB (centroid[0] + (0.5f * model[0]),
                                     centroid[1] + (0.5f * model[1]),
                                     centroid[2] + (0.5f * model[2]));
                             sprintf (name, "normal_%lu", i);
