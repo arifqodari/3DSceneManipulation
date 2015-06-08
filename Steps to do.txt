@@ -1,0 +1,15 @@
+Profile project
+
+Meeting 8/6/2015
+1. Segmentation
+	- Selective search in 3D --> convey 2D method into 3D
+		Let user to decide, e.g. with PCL library
+	- RCNN (more sophisticated)
+		Learn selected classes, e.g. chairs, windows, walls
+		
+2. Illumination properties, e.g. lighting conditions 
+	- Can infer location of the light source from the 3D geometry. No need for manual labeling. 
+	- Intrinsic image decomposition to estimate the illumination 
+
+3. Make it user friendly, e.g. drag or drop! 
+
