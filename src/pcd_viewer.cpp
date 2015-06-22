@@ -119,13 +119,29 @@ pcl::search::KdTree<pcl::PointXYZ> search;
 pcl::PCLPointCloud2::Ptr cloud;
 pcl::PointCloud<pcl::PointXYZ>::Ptr xyzcloud;
 
+// TODO: Try to see why this apparantly breaks the code.
+// I think it has to do with pointer problems... but have not been able to find it yet.
+struct click_token {
+	std::string *name;
+	pcl::PCLPointCloud2::Ptr cloud;
+
+	click_token(std::string n, pcl::PCLPointCloud2::Ptr c){
+		name = new std::string(n);
+		cloud = c;
+	}
+	~click_token() { delete name; }
+};
+
 void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cookie) {
   int idx = event.getPointIndex ();
   if (idx == -1)
     return;
-
-  if (!cloud) {
-    cloud = *reinterpret_cast<pcl::PCLPointCloud2::Ptr*> (cookie);
+  click_token* information = static_cast<click_token*> (cookie);
+  std::string* testtest = information->name;
+  cout << "\r\n TESTTEST" << *testtest << " \r\n";
+  if (!cloud) {	
+	  // TODO: Find out whether I can check if this cloud is correct.
+	cloud = information->cloud;
     xyzcloud.reset (new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromPCLPointCloud2 (*cloud, *xyzcloud);
     search.setInputCloud (xyzcloud);
@@ -141,7 +157,6 @@ void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cook
   search.nearestKSearch (picked_pt, 1, indices, distances);
 
   PCL_INFO ("Point index picked: %d (real: %d) - [%f, %f, %f]\n", idx, indices[0], picked_pt.x, picked_pt.y, picked_pt.z);
-
   idx = indices[0];
   // If two points were selected, draw an arrow between them
   pcl::PointXYZ p1, p2;
@@ -159,7 +174,7 @@ void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cook
   for (size_t i = 0; i < cloud->fields.size (); ++i) {
     if (!isMultiDimensionalFeatureField (cloud->fields[i]))
       continue;
-    PCL_INFO ("Multidimensional field found: %s\n", cloud->fields[i].name.c_str ());
+	PCL_INFO ("Multidimensional field found: %s\n", cloud->fields[i].name.c_str ());
 #if VTK_MAJOR_VERSION==6 || (VTK_MAJOR_VERSION==5 && VTK_MINOR_VERSION>6)
     ph_global.addFeatureHistogram (*cloud, cloud->fields[i].name, idx, ss.str ());
     ph_global.renderOnce ();
@@ -169,7 +184,9 @@ void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cook
     pcl::PointXYZ pos;
     event.getPoint (pos.x, pos.y, pos.z);
     p->addText3D<pcl::PointXYZ> (ss.str (), pos, 0.0005, 1.0, 1.0, 1.0, ss.str ());
-  }  
+  }
+  // TODO: once the name and cloud seem to work properly, this should work.
+  //p->removePointCloud(information->name);
 }
 
 /* ---[ */
@@ -318,6 +335,7 @@ int main (int argc, char** argv) {
       return (-1);
 
     std::stringstream cloud_name;
+
     // ---[ Special check for 1-point multi-dimension histograms
     if (cloud->fields.size () == 1 && isMultiDimensionalFeatureField (cloud->fields[0])) {
       cloud_name << argv[p_file_indices.at (i)];
@@ -332,7 +350,8 @@ int main (int argc, char** argv) {
       ph->addFeatureHistogram (*cloud, cloud->fields[0].name, cloud_name.str ());
 #endif
       print_info ("[done, "); print_value ("%g", tt.toc ()); print_info (" ms : "); print_value ("%d", cloud->fields[0].count); print_info (" points]\n");
-      continue;
+	  cout << "\r\n TEST0 " << cloud_name.rdbuf()->str() << endl;
+	  continue;
     }
 
     // ---[ Special check for 2D images
@@ -351,15 +370,17 @@ int main (int argc, char** argv) {
 
       continue;
     }
-
+	std::stringstream test;
     cloud_name << argv[p_file_indices.at (i)] << "-" << i;
-
+	cout << "\r\n TEST1 " << cloud_name.rdbuf()->str() << endl;
     // Create the PCLVisualizer object here on the first encountered XYZ file
     if (!p) {
       p.reset (new pcl::visualization::PCLVisualizer (argc, argv, "PCD viewer"));
-      if (use_pp)   // Only enable the point picking callback if the command line parameter is enabled
-        p->registerPointPickingCallback (&pp_callback, static_cast<void*> (&cloud));
-
+	  if (use_pp) {   // Only enable the point picking callback if the command line parameter is enabled
+		  click_token* information = new click_token(cloud_name.rdbuf()->str(), cloud);
+		  cout << "\r\n TEST3" << cloud_name.rdbuf()->str() << "\r\n";
+		  p->registerPointPickingCallback(&pp_callback, static_cast<void*> (&information));
+	  }
       // Set whether or not we should be using the vtkVertexBufferObjectMapper
       p->setUseVbos (use_vbos);
 
