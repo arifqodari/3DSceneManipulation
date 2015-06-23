@@ -123,13 +123,13 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr xyzcloud;
 // I think it has to do with pointer problems... but have not been able to find it yet.
 struct click_token {
 	std::string *name;
-	pcl::PCLPointCloud2::Ptr cloud;
+	pcl::PCLPointCloud2::Ptr* cloud;
 
 	click_token(std::string n, pcl::PCLPointCloud2::Ptr c){
 		name = new std::string(n);
-		cloud = c;
+		cloud = new pcl::PCLPointCloud2::Ptr(c);
 	}
-	~click_token() { delete name; }
+	~click_token() { delete name; delete cloud; }
 };
 
 void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cookie) {
@@ -139,11 +139,11 @@ void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cook
   click_token* information = static_cast<click_token*> (cookie);
   std::string* testtest = information->name;
   cout << "\r\n TESTTEST" << *testtest << " \r\n";
+  pcl::PCLPointCloud2::Ptr tempCloud = *(information->cloud);
   if (!cloud) {	
 	  // TODO: Find out whether I can check if this cloud is correct.
-	cloud = information->cloud;
     xyzcloud.reset (new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::fromPCLPointCloud2 (*cloud, *xyzcloud);
+	pcl::fromPCLPointCloud2(*tempCloud, *xyzcloud);
     search.setInputCloud (xyzcloud);
   }
   // Return the correct index in the cloud instead of the index on the screen
@@ -350,7 +350,7 @@ int main (int argc, char** argv) {
       ph->addFeatureHistogram (*cloud, cloud->fields[0].name, cloud_name.str ());
 #endif
       print_info ("[done, "); print_value ("%g", tt.toc ()); print_info (" ms : "); print_value ("%d", cloud->fields[0].count); print_info (" points]\n");
-	  cout << "\r\n TEST0 " << cloud_name.rdbuf()->str() << endl;
+	  cout << "\r\n TEST0 " << cloud_name.str() << endl;
 	  continue;
     }
 
@@ -372,13 +372,13 @@ int main (int argc, char** argv) {
     }
 	std::stringstream test;
     cloud_name << argv[p_file_indices.at (i)] << "-" << i;
-	cout << "\r\n TEST1 " << cloud_name.rdbuf()->str() << endl;
+	cout << "\r\n TEST1 " << cloud_name.str() << endl;
     // Create the PCLVisualizer object here on the first encountered XYZ file
     if (!p) {
       p.reset (new pcl::visualization::PCLVisualizer (argc, argv, "PCD viewer"));
 	  if (use_pp) {   // Only enable the point picking callback if the command line parameter is enabled
-		  click_token* information = new click_token(cloud_name.rdbuf()->str(), cloud);
-		  cout << "\r\n TEST3" << cloud_name.rdbuf()->str() << "\r\n";
+		  click_token* information = new click_token(cloud_name.str(), cloud);
+		  cout << "\r\n TEST3 " << cloud_name.str() << "\r\n";
 		  p->registerPointPickingCallback(&pp_callback, static_cast<void*> (&information));
 	  }
       // Set whether or not we should be using the vtkVertexBufferObjectMapper
