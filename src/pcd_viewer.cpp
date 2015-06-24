@@ -116,79 +116,69 @@ pcl::visualization::PCLPlotter ph_global;
 boost::shared_ptr<pcl::visualization::PCLVisualizer> p;
 std::vector<boost::shared_ptr<pcl::visualization::ImageViewer> > imgs;
 pcl::search::KdTree<pcl::PointXYZ> search;
-pcl::PCLPointCloud2::Ptr cloud;
 pcl::PointCloud<pcl::PointXYZ>::Ptr xyzcloud;
 
 // TODO: Try to see why this apparantly breaks the code.
 // I think it has to do with pointer problems... but have not been able to find it yet.
 struct click_token {
 	std::string name;
-	pcl::PCLPointCloud2::Ptr* cloud;
+	pcl::PCLPointCloud2::Ptr cloud;
 
 	click_token(std::string n, pcl::PCLPointCloud2::Ptr c){
 		name = n.c_str();
-		cloud = new pcl::PCLPointCloud2::Ptr(c);
+		cloud = *(new pcl::PCLPointCloud2::Ptr(c));
 	}
-	~click_token() { delete cloud; }
 };
 
 std::vector<click_token> CT;
-
-void pp_callback (const pcl::visualization::PointPickingEvent& event, void* cookie) {
+std::vector<std::string> names;
+std::vector<pcl::PCLPointCloud2::Ptr> clouds;
+void pp_callback (const pcl::visualization::PointPickingEvent& event) {
   int idx = event.getPointIndex ();
   if (idx == -1)
     return;
-  click_token* information = static_cast<click_token*> (cookie);
-  std::string testtest = information->name;
-  cout << "\r\n TESTTEST" << testtest << " \r\n";
-  if (!cloud) {	
-	  // TODO: Find out whether I can check if this cloud is correct.
-	  cloud = *(information->cloud);
-    xyzcloud.reset (new pcl::PointCloud<pcl::PointXYZ>);
-	pcl::fromPCLPointCloud2(*cloud, *xyzcloud);
-    search.setInputCloud (xyzcloud);
-  }
-  // Return the correct index in the cloud instead of the index on the screen
-  std::vector<int> indices (1);
-  std::vector<float> distances (1);
 
-  // Because VTK/OpenGL stores data without NaN, we lose the 1-1 correspondence, so we must search for the real point
+  int numClouds = names.size();
+  int bestID = -1; // ID of the clicked cloud.
+  int bestDistance = INFINITY;
   pcl::PointXYZ picked_pt;
-  event.getPoint (picked_pt.x, picked_pt.y, picked_pt.z);
-  //TODO: Look into this.
-  search.nearestKSearch (picked_pt, 1, indices, distances);
+  for (int i = 0; i < numClouds; i++) {
+	  xyzcloud.reset(new pcl::PointCloud<pcl::PointXYZ>);
+	  pcl::fromPCLPointCloud2(*(clouds[i]), *xyzcloud);
+	  search.setInputCloud(xyzcloud);
+	  // Return the correct index in the cloud instead of the index on the screen
+	  std::vector<int> indices(1);
+	  std::vector<float> distances(1);
+	  // Because VTK/OpenGL stores data without NaN, we lose the 1-1 correspondence, so we must search for the real point
+	  event.getPoint(picked_pt.x, picked_pt.y, picked_pt.z);
+	  //TODO: Look into this.
+	  search.nearestKSearch(picked_pt, 1, indices, distances);
+	  cout << "ID: " << i << "Distance: " << distances[0] << " Current best: " << bestDistance << " Best ID: " << bestID << endl;
+	  if (distances[0] < bestDistance) {
+		  bestID = i;
+		  bestDistance = distances[0];
+	  }
 
-  PCL_INFO ("Point index picked: %d (real: %d) - [%f, %f, %f]\n", idx, indices[0], picked_pt.x, picked_pt.y, picked_pt.z);
-  idx = indices[0];
-  // If two points were selected, draw an arrow between them
-  pcl::PointXYZ p1, p2;
-  if (event.getPoints (p1.x, p1.y, p1.z, p2.x, p2.y, p2.z) && p) {
-    std::stringstream ss;
-    ss << p1 << p2;
-    p->addArrow<pcl::PointXYZ, pcl::PointXYZ> (p1, p2, 1.0, 1.0, 1.0, ss.str ());
-    return;
   }
+  PCL_INFO("Point index picked: %d (real: %d) - [%f, %f, %f]\n", idx, bestID, picked_pt.x, picked_pt.y, picked_pt.z);
+  idx = -99;
+
+  std::string name_cloud = names[bestID];
+  cout << "\r\n TESTTEST" << name_cloud << " \r\n";
 
   // Else, if a single point has been selected
   std::stringstream ss;
-  ss << idx;
-  // Get the cloud's fields
-  for (size_t i = 0; i < cloud->fields.size (); ++i) {
-    if (!isMultiDimensionalFeatureField (cloud->fields[i]))
-      continue;
-	PCL_INFO ("Multidimensional field found: %s\n", cloud->fields[i].name.c_str ());
-#if VTK_MAJOR_VERSION==6 || (VTK_MAJOR_VERSION==5 && VTK_MINOR_VERSION>6)
-    ph_global.addFeatureHistogram (*cloud, cloud->fields[i].name, idx, ss.str ());
-    ph_global.renderOnce ();
-#endif
-  }
+  ss << "clicked";
+
   if (p) {
     pcl::PointXYZ pos;
     event.getPoint (pos.x, pos.y, pos.z);
     p->addText3D<pcl::PointXYZ> (ss.str (), pos, 0.0005, 1.0, 1.0, 1.0, ss.str ());
   }
   // TODO: once the name and cloud seem to work properly, this should work.
-  p->removePointCloud(information->name);
+  p->removePointCloud(name_cloud);
+  names.erase(names.begin() + bestID);
+  clouds.erase(clouds.begin() + bestID);
 }
 
 /* ---[ */
@@ -322,50 +312,49 @@ int main (int argc, char** argv) {
     }
   }
 
-  pcl::PCLPointCloud2::Ptr cloud;
   // Go through PCD files
   for (size_t i = 0; i < p_file_indices.size (); ++i) {
+	  clouds.push_back(*(new pcl::PCLPointCloud2::Ptr));
     tt.tic ();
-    cloud.reset (new pcl::PCLPointCloud2);
+	clouds.back().reset(new pcl::PCLPointCloud2);
     Eigen::Vector4f origin;
     Eigen::Quaternionf orientation;
     int version;
 
     print_highlight (stderr, "Loading "); print_value (stderr, "%s ", argv[p_file_indices.at (i)]);
 
-    if (pcd.read (argv[p_file_indices.at (i)], *cloud, origin, orientation, version) < 0)
+	if (pcd.read(argv[p_file_indices.at(i)], *(clouds.back()), origin, orientation, version) < 0)
       return (-1);
 
     std::stringstream cloud_name;
 
     // ---[ Special check for 1-point multi-dimension histograms
-    if (cloud->fields.size () == 1 && isMultiDimensionalFeatureField (cloud->fields[0])) {
+	if (clouds.back()->fields.size() == 1 && isMultiDimensionalFeatureField(clouds.back()->fields[0])) {
       cloud_name << argv[p_file_indices.at (i)];
-
 #if VTK_MAJOR_VERSION==6 || (VTK_MAJOR_VERSION==5 && VTK_MINOR_VERSION>6)
       if (!ph)
         ph.reset (new pcl::visualization::PCLPlotter);
 #endif
 
-      pcl::getMinMax (*cloud, 0, cloud->fields[0].name, min_p, max_p);
+	  pcl::getMinMax(*(clouds.back()), 0, clouds.back()->fields[0].name, min_p, max_p);
 #if VTK_MAJOR_VERSION==6 || (VTK_MAJOR_VERSION==5 && VTK_MINOR_VERSION>6)
-      ph->addFeatureHistogram (*cloud, cloud->fields[0].name, cloud_name.str ());
+	  ph->addFeatureHistogram(*(clouds.back()), clouds.back()->fields[0].name, cloud_name.str());
 #endif
-      print_info ("[done, "); print_value ("%g", tt.toc ()); print_info (" ms : "); print_value ("%d", cloud->fields[0].count); print_info (" points]\n");
+	  print_info("[done, "); print_value("%g", tt.toc()); print_info(" ms : "); print_value("%d", clouds.back()->fields[0].count); print_info(" points]\n");
 	  cout << "\r\n TEST0 " << cloud_name.str() << endl;
 	  continue;
     }
 
     // ---[ Special check for 2D images
-    if (cloud->fields.size () == 1 && isOnly2DImage (cloud->fields[0])) {
-      print_info ("[done, "); print_value ("%g", tt.toc ()); print_info (" ms : "); print_value ("%u", cloud->width * cloud->height); print_info (" points]\n");
-      print_info ("Available dimensions: "); print_value ("%s\n", pcl::getFieldsList (*cloud).c_str ());
+	if (clouds.back()->fields.size() == 1 && isOnly2DImage(clouds.back()->fields[0])) {
+		print_info("[done, "); print_value("%g", tt.toc()); print_info(" ms : "); print_value("%u", clouds.back()->width * clouds.back()->height); print_info(" points]\n");
+		print_info("Available dimensions: "); print_value("%s\n", pcl::getFieldsList(*(clouds.back())).c_str());
       
       std::stringstream name;
       name << "PCD Viewer :: " << argv[p_file_indices.at (i)];
       pcl::visualization::ImageViewer::Ptr img (new pcl::visualization::ImageViewer (name.str ()));
       pcl::PointCloud<pcl::RGB> rgb_cloud;
-      pcl::fromPCLPointCloud2 (*cloud, rgb_cloud);
+	  pcl::fromPCLPointCloud2(*(clouds.back()), rgb_cloud);
 
       img->addRGBImage (rgb_cloud);
       imgs.push_back (img);
@@ -374,15 +363,16 @@ int main (int argc, char** argv) {
     }
 	std::stringstream test;
     cloud_name << argv[p_file_indices.at (i)] << "-" << i;
-	cout << "\r\n TEST1 " << cloud_name.str() << "\r\n"<< endl;
+
+	CT.push_back(*(new click_token(cloud_name.str().c_str(), clouds.back())));
+	names.push_back(cloud_name.str().c_str());
+	cout << "\r\n TEST1 " << cloud_name.str() << "CT size: " << names.size() << "\r\n"<< endl;
     // Create the PCLVisualizer object here on the first encountered XYZ file
     if (!p) {
 		cout << "\r\n TEST1.5 " << cloud_name.str() << "\r\n" << endl;
       p.reset (new pcl::visualization::PCLVisualizer (argc, argv, "PCD viewer"));
 	  if (use_pp) {   // Only enable the point picking callback if the command line parameter is enabled
-		  CT.push_back(*(new click_token(cloud_name.str().c_str(), cloud)));
-		  cout << "\r\n TEST3 " << cloud_name.str() << "\r\n";
-		  p->registerPointPickingCallback(&pp_callback, static_cast<void*> (&(CT.back())));
+		  p->registerPointPickingCallback(&pp_callback);
 	  }
       // Set whether or not we should be using the vtkVertexBufferObjectMapper
       p->setUseVbos (use_vbos);
@@ -396,7 +386,7 @@ int main (int argc, char** argv) {
       }
     }
 
-    if (cloud->width * cloud->height == 0) {
+	if (clouds.back()->width * clouds.back()->height == 0) {
       print_error ("[error: no points found!]\n");
       return (-1);
     }
@@ -404,42 +394,42 @@ int main (int argc, char** argv) {
     // If no color was given, get random colors
     if (fcolorparam) {
       if (fcolor_r.size () > i && fcolor_g.size () > i && fcolor_b.size () > i)
-        color_handler.reset (new pcl::visualization::PointCloudColorHandlerCustom<pcl::PCLPointCloud2> (cloud, fcolor_r[i], fcolor_g[i], fcolor_b[i]));
+		  color_handler.reset(new pcl::visualization::PointCloudColorHandlerCustom<pcl::PCLPointCloud2>(clouds.back(), fcolor_r[i], fcolor_g[i], fcolor_b[i]));
       else
-        color_handler.reset (new pcl::visualization::PointCloudColorHandlerRandom<pcl::PCLPointCloud2> (cloud));
+		  color_handler.reset(new pcl::visualization::PointCloudColorHandlerRandom<pcl::PCLPointCloud2>(clouds.back()));
     }
     else
-      color_handler.reset (new pcl::visualization::PointCloudColorHandlerRandom<pcl::PCLPointCloud2> (cloud));
+		color_handler.reset(new pcl::visualization::PointCloudColorHandlerRandom<pcl::PCLPointCloud2>(clouds.back()));
 
     // Add the dataset with a XYZ and a random handler
-    geometry_handler.reset (new pcl::visualization::PointCloudGeometryHandlerXYZ<pcl::PCLPointCloud2> (cloud));
+	geometry_handler.reset(new pcl::visualization::PointCloudGeometryHandlerXYZ<pcl::PCLPointCloud2>(clouds.back()));
     // Add the cloud to the renderer
-    p->addPointCloud (cloud, geometry_handler, color_handler, origin, orientation, cloud_name.str (), viewport);
+	p->addPointCloud(clouds.back(), geometry_handler, color_handler, origin, orientation, cloud_name.str(), viewport);
 	
     // Add every dimension as a possible color
     if (!fcolorparam) {
       int rgb_idx = 0;
       int label_idx = 0;
-      for (size_t f = 0; f < cloud->fields.size (); ++f) {
-        if (cloud->fields[f].name == "rgb" || cloud->fields[f].name == "rgba") {
+	  for (size_t f = 0; f < clouds.back()->fields.size(); ++f) {
+		  if (clouds.back()->fields[f].name == "rgb" || clouds.back()->fields[f].name == "rgba") {
           rgb_idx = f + 1;
-          color_handler.reset (new pcl::visualization::PointCloudColorHandlerRGBField<pcl::PCLPointCloud2> (cloud));
+		  color_handler.reset(new pcl::visualization::PointCloudColorHandlerRGBField<pcl::PCLPointCloud2>(clouds.back()));
         } else {
-          if (!isValidFieldName (cloud->fields[f].name))
+			  if (!isValidFieldName(clouds.back()->fields[f].name))
             continue;
-          color_handler.reset (new pcl::visualization::PointCloudColorHandlerGenericField<pcl::PCLPointCloud2> (cloud, cloud->fields[f].name));
+			  color_handler.reset(new pcl::visualization::PointCloudColorHandlerGenericField<pcl::PCLPointCloud2>(clouds.back(), clouds.back()->fields[f].name));
         }
         // Add the cloud to the renderer
-        p->addPointCloud (cloud, color_handler, origin, orientation, cloud_name.str (), viewport);
+		  p->addPointCloud(clouds.back(), color_handler, origin, orientation, cloud_name.str(), viewport);
       }
       // Set RGB color handler or label handler as default
       p->updateColorHandlerIndex (cloud_name.str (), (rgb_idx ? rgb_idx : label_idx));
     }
 
     // Additionally, add normals as a handler
-    geometry_handler.reset (new pcl::visualization::PointCloudGeometryHandlerSurfaceNormal<pcl::PCLPointCloud2> (cloud));
+	geometry_handler.reset(new pcl::visualization::PointCloudGeometryHandlerSurfaceNormal<pcl::PCLPointCloud2>(clouds.back()));
     if (geometry_handler->isCapable ())
-      p->addPointCloud (cloud, geometry_handler, origin, orientation, cloud_name.str (), viewport);
+		p->addPointCloud(clouds.back(), geometry_handler, origin, orientation, cloud_name.str(), viewport);
 
     if (use_immediate_rendering)
       // Set immediate mode rendering ON
@@ -459,8 +449,8 @@ int main (int argc, char** argv) {
       p->resetCamera ();
     }
 
-    print_info ("[done, "); print_value ("%g", tt.toc ()); print_info (" ms : "); print_value ("%u", cloud->width * cloud->height); print_info (" points]\n");
-    print_info ("Available dimensions: "); print_value ("%s\n", pcl::getFieldsList (*cloud).c_str ());
+	print_info("[done, "); print_value("%g", tt.toc()); print_info(" ms : "); print_value("%u", clouds.back()->width * clouds.back()->height); print_info(" points]\n");
+	print_info("Available dimensions: "); print_value("%s\n", pcl::getFieldsList(*(clouds.back())).c_str());
     if (p->cameraFileLoaded ())
       print_info ("Camera parameters restored from %s.\n", p->getCameraFile ().c_str ());
   }
@@ -472,7 +462,7 @@ int main (int argc, char** argv) {
   // Note: avoid resetting the cloud, otherwise the PointPicking callback will fail
   // Only enable the point picking callback if the command line parameter is enabled
   if (!use_pp) {   
-    cloud.reset ();
+	  clouds.back().reset();
     xyzcloud.reset ();
   }
 
