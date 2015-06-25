@@ -66,7 +66,7 @@ printHelp (int, char **argv)
     print_info ("  where the optional arguments are:\n");
     print_info ("                     -search_radius X = Search Radius (default: ");
     print_value ("%f", default_search_radius);
-    print_info (")\n");
+    print_info (")\n")-;
 }
 
 
