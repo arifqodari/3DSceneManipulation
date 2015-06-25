@@ -123,7 +123,7 @@ class ObjectSelection
     /////////////////////////////////////////////////////////////////////////
     void
     segment (const PointT &picked_point, 
-             int picked_idx,
+             int picked_idx, bool color,
              PlanarRegion<PointT> &region)
     {
 		// kd-tree object for searches.
@@ -147,89 +147,93 @@ class ObjectSelection
 
 		std::vector <pcl::PointIndices> clusters;
 		clustering.extract(clusters);
-
-
-		//pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_segmented(new pcl::PointCloud<pcl::PointXYZRGB>());
 		cloud_ = clustering.getColoredCloud();
 
-		print_highlight("Number of planar regions detected: %lu for a cloud of %lu points\n", clusters.size(), cloud_->size());
-
+		//print_highlight("Number of planar regions detected: %lu for a cloud of %lu points\n", clusters.size(), cloud_->size());
 		int K = 1;
 		std::vector<int> pointIdxNKNSearch(K);
 		std::vector<float> pointNKNSquaredDistance(K);
-		float smallestDist = 100000;
-		
+
 		pcl::KdTreeFLANN<pcl::PointXYZRGB> kt;
 		kt.setInputCloud(cloud_);
 		kt.nearestKSearch(picked_point, K, pointIdxNKNSearch, pointNKNSquaredDistance);
-		int counter = 0;
-		
-		
-		pcl::PointCloud<pcl::PointXYZRGB>::Ptr newCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr newCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+		
 		for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
 		{
+			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-			//if (pointNKNSquaredDistance[0] < smallestDist)
-			//{
-//				PCL_INFO("IN SMALLEST");
-			if(std::find(i->indices.begin(), i->indices.end(), pointIdxNKNSearch[0]) == i->indices.end())
+			if (std::find(i->indices.begin(), i->indices.end(), pointIdxNKNSearch[0]) == i->indices.end())
 			{
-				pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
-				//typename PointCloud<PointT>::Ptr cloud_;
 				for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
 				{
 					cluster->points.push_back(cloud_->points[*point]);
 				}
-				//smallestDist = pointNKNSquaredDistance[0];
 				cluster->width = cluster->points.size();
 				cluster->height = 1;
 				cluster->is_dense = true;
 
 				*newCloud = (*cluster) + (*newCloud);
-
-
-				//cloud_viewer_->addPointCloud(cluster, std::to_string(counter));
 			}
-		//	counter++;
+			else if (color)
+			{
+				//pcl::PointXYZRGB refPoint = picked_point;
+
+				for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
+				{
+					int rDifference = picked_point.r - cloud_->points[*point].r;
+					int gDifference = picked_point.g - cloud_->points[*point].g;
+					int bDifference = picked_point.b - cloud_->points[*point].b;
+
+					int rNew = 250 - rDifference;
+					int gNew = 15 - gDifference;
+					int bNew = 15 - bDifference;
+
+					if (rNew < 0)
+					{
+						rNew = 0;
+					}
+					if (rNew > 255)
+					{
+						rNew = 255;
+					}
+					if (gNew < 0)
+					{
+						gNew = 0;
+					}
+					if (gNew > 255)
+					{
+						gNew = 255;
+					}
+					if (bNew < 0)
+					{
+						bNew = 0;
+					}
+					if (bNew > 255)
+					{
+						bNew = 255;
+					}
+
+					cloud_->points[*point].r = rNew;
+					cloud_->points[*point].g = gNew;
+					cloud_->points[*point].b = bNew;
+
+					cluster->points.push_back(cloud_->points[*point]);
+				}
+
+				cluster->width = cluster->points.size();
+				cluster->height = 1;
+				cluster->is_dense = true;
+
+				*newCloud = (*cluster) + (*newCloud);
+			}
 		}
-		
 
-		//pcl::PCDWriter writer;
-		//pcl::console::print_highlight("Number of segments done is %lu\n", clusters.size());
-		//writer.write<pcl::PointXYZRGB>("segment_result.pcd", *cluster, false);
-
-		//std::cout << "Cluster " << currentClusterNum << " has " << cluster->points.size() << " points." << std::endl;
-		//std::string fileName = "cluster_test.pcd";
-		//pcl::io::savePCDFileBinary(fileName, *cluster);
 		cloud_viewer_->removePointCloud("scene");
 		cloud_viewer_->addPointCloud(newCloud, "scene");
 		cloud_ = newCloud;
-
-		//counter++;
-		//cloud_viewer_->removePointCloud("scene");
-
-		/*
-		std::vector<int> pointIdxRadiusSearch;
-		std::vector<float> pointRadiusSquaredDistance;
-
-		float radius = 256.0f * rand() / (RAND_MAX + 1.0f);
-
-		std::cout << "Neighbors within radius search at (" << searchPoint.x
-			<< " " << searchPoint.y
-			<< " " << searchPoint.z
-			<< ") with radius=" << radius << std::endl;
-
-
-		if (kdtree.radiusSearch(searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0)
-		{
-			for (size_t i = 0; i < pointIdxRadiusSearch.size(); ++i)
-				std::cout << "    " << cloud->points[pointIdxRadiusSearch[i]].x
-				<< " " << cloud->points[pointIdxRadiusSearch[i]].y
-				<< " " << cloud->points[pointIdxRadiusSearch[i]].z
-				<< " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
-		}*/
-
+		
     }
 
     /////////////////////////////////////////////////////////////////////////
@@ -281,7 +285,7 @@ class ObjectSelection
       //  * first, segment all the planes in the scene, and find the one closest to our picked point
       //  * then, use euclidean clustering to find the object that we clicked on and return it
       PlanarRegion<PointT> region;
-      segment (picked_pt, indices[0], region);
+      segment (picked_pt, indices[0], false, region);
 
       // If no region could be determined, exit
       if (region.getContour ().empty ())
@@ -379,6 +383,8 @@ class ObjectSelection
     
     typename PointCloud<PointT>::Ptr cloud_;
     typename search::Search<PointT>::Ptr search_;
+
+
   private:
     // Results
     typename PointCloud<PointT>::Ptr plane_;
@@ -388,6 +394,7 @@ class ObjectSelection
 int
 main (int argc, char** argv)
 {
+
   // Parse the command line arguments for .pcd files
   std::vector<int> p_file_indices;
   p_file_indices = parse_file_extension_argument (argc, argv, ".pcd");
@@ -405,6 +412,18 @@ main (int argc, char** argv)
     plane_file = argv[p_file_indices[2]];
   if (p_file_indices.size () >= 2)
     object_file = argv[p_file_indices[1]];
+
+  //boost::shared_ptr<bool> color;
+
+  /*
+  if (argv[1] == "-c")
+  {
+	  *color = true;
+  }
+  else
+  {
+	  *color = false;
+  }*/
 
 
   PCDReader reader;
