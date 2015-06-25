@@ -42,6 +42,8 @@
 #include <pcl/surface/concave_hull.h>
 #include <pcl/surface/convex_hull.h>
 #include <pcl/surface/gp3.h>
+#include <pcl/surface/poisson.h>
+#include <pcl/surface/mls.h>
 
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/features/normal_3d.h>
@@ -57,7 +59,17 @@ using namespace pcl;
 using namespace pcl::io;
 using namespace pcl::console;
 
+int default_depth = 8;
+int default_solver_divide = 8;
+int default_iso_divide = 8;
+int default_search_k = 100;
+
 float default_search_radius = 0.025f;
+float default_point_weight = 4.0f;
+float default_scale = 1.0f;
+float default_samples_pernode = 1.0f;
+float default_alpha = 0.15f;
+
 
 void
 printHelp (int, char **argv)
@@ -67,11 +79,96 @@ printHelp (int, char **argv)
     print_info ("                     -search_radius X = Search Radius (default: ");
     print_value ("%f", default_search_radius);
     print_info (")\n");
+    print_info ("                     -depth X          = set the maximum depth of the tree that will be used for surface reconstruction (default: ");
+    print_value ("%d", default_depth); print_info (")\n");
+    print_info ("                     -solver_divide X  = set the the depth at which a block Gauss-Seidel solver is used to solve the Laplacian equation (default: ");
+    print_value ("%d", default_solver_divide); print_info (")\n");
+    print_info ("                     -iso_divide X     = Set the depth at which a block iso-surface extractor should be used to extract the iso-surface (default: ");
+    print_value ("%d", default_iso_divide); print_info (")\n");
+    print_info ("                     -point_weight X   = Specifies the importance that interpolation of the point samples is given in the formulation of the screened Poisson equation. The results of the original (unscreened) Poisson Reconstruction can be obtained by setting this value to 0. (default: ");
+    print_value ("%f", default_point_weight); print_info (")\n");
+    print_info ("                     -search_k X   = Specifies the number of k nearest neighbors to use for the feature estimation. (default: ");
+    print_value ("%f", default_search_k); print_info (")\n");
+    print_info ("                     -scale X   = Specifies the the ratio between the diameter of the cube used for reconstruction and the diameter of the samples' bounding cube. (default: ");
+    print_value ("%f", default_scale); print_info (")\n");
+    print_info ("                     -samples_pernode X   = Specifies the minimum number of sample points that should fall within an octree node as the octree construction is adapted to sampling density. (default: ");
+    print_value ("%f", default_samples_pernode); print_info (")\n");
 }
 
+void
+resampling (PointCloud<PointXYZ>::ConstPtr cloud_in, float search_radius)
+{
+    // Create a KD-Tree
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
+
+    pcl::PointCloud<pcl::PointNormal> mls_points;
+
+    // Init object (second point type is for the normals, even if unused)
+    pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> mls;
+
+    mls.setComputeNormals (true);
+
+    // Set parameters
+    mls.setInputCloud (cloud_in);
+    mls.setPolynomialFit (true);
+    mls.setSearchMethod (tree);
+    mls.setSearchRadius (search_radius);
+
+    // Reconstruct
+    mls.process (mls_points);
+
+    // Save output
+    pcl::io::savePCDFile ("mls.pcd", mls_points);
+}
 
 void
-triangulate (PointCloud<PointXYZ>::ConstPtr cloud, float search_radius, PolygonMesh &triangles)
+hull (PointCloud<PointXYZ>::ConstPtr cloud_in,
+        bool convex_concave_hull,
+        float alpha,
+        PointCloud<PointXYZ>::Ptr &mesh_out)
+{
+    if (!convex_concave_hull)
+    {
+        print_info ("Computing the convex hull of a cloud with %lu points.\n", cloud_in->size ());
+        ConvexHull<PointXYZ> convex_hull;
+        convex_hull.setInputCloud (cloud_in);
+        convex_hull.reconstruct (*mesh_out);
+    }
+    else
+    {
+        print_info ("Computing the concave hull (alpha shapes) with alpha %f of a cloud with %lu points.\n", alpha, cloud_in->size ());
+        ConcaveHull<PointXYZ> concave_hull;
+        concave_hull.setInputCloud (cloud_in);
+        concave_hull.setAlpha (alpha);
+        concave_hull.reconstruct (*mesh_out);
+    }
+}
+
+void
+hull2 (PointCloud<PointXYZ>::ConstPtr cloud_in,
+        bool convex_concave_hull,
+        float alpha,
+        PolygonMesh &mesh_out)
+{
+    if (!convex_concave_hull)
+    {
+        print_info ("Computing the convex hull of a cloud with %lu points.\n", cloud_in->size ());
+        ConvexHull<PointXYZ> convex_hull;
+        convex_hull.setInputCloud (cloud_in);
+        convex_hull.reconstruct (mesh_out);
+    }
+    else
+    {
+        print_info ("Computing the concave hull (alpha shapes) with alpha %f of a cloud with %lu points.\n", alpha, cloud_in->size ());
+        ConcaveHull<PointXYZ> concave_hull;
+        concave_hull.setInputCloud (cloud_in);
+        concave_hull.setAlpha (alpha);
+        concave_hull.reconstruct (mesh_out);
+    }
+}
+
+void
+triangulate (PointCloud<PointXYZ>::ConstPtr cloud, float search_radius, int search_k, PolygonMesh &triangles)
 {
     print_info ("Fast triangulation of point clouds.\n");
 
@@ -82,7 +179,7 @@ triangulate (PointCloud<PointXYZ>::ConstPtr cloud, float search_radius, PolygonM
     tree->setInputCloud (cloud);
     n.setInputCloud (cloud);
     n.setSearchMethod (tree);
-    n.setKSearch (20);
+    n.setKSearch (search_k);
     n.compute (*normals);
     //* normals should not contain the point normals + surface curvatures
 
@@ -120,6 +217,49 @@ triangulate (PointCloud<PointXYZ>::ConstPtr cloud, float search_radius, PolygonM
     std::vector<int> states = gp3.getPointStates();
 }
 
+void
+poisson_reconstruction (const PointCloud<PointXYZ>::ConstPtr input, PolygonMesh &mesh_out,
+        int depth, int solver_divide, int iso_divide, float point_weight, int search_k,
+        float scale, float samples_pernode)
+{
+    print_info ("Poisson reconstruction");
+
+    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> n;
+    pcl::PointCloud<pcl::Normal>::Ptr normals (new pcl::PointCloud<pcl::Normal>);
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
+    tree->setInputCloud (input);
+    n.setInputCloud (input);
+    n.setSearchMethod (tree);
+    n.setKSearch (search_k);
+    n.compute (*normals);
+    //* normals should not contain the point normals + surface curvatures
+
+    // Concatenate the XYZ and normal fields*
+    pcl::PointCloud<pcl::PointNormal>::Ptr xyz_cloud (new pcl::PointCloud<pcl::PointNormal>);
+    pcl::concatenateFields (*input, *normals, *xyz_cloud);
+    //* cloud_with_normals = cloud + normals
+
+    // pcl::PCDWriter writer;
+    // writer.write ("aaa.pcd", *xyz_cloud, false);
+
+    Poisson<PointNormal> poisson;
+    poisson.setDepth (depth);
+    poisson.setSolverDivide (solver_divide);
+    poisson.setIsoDivide (iso_divide);
+    poisson.setPointWeight (point_weight);
+    poisson.setSamplesPerNode (samples_pernode);
+    poisson.setScale (scale);
+    poisson.setInputCloud (xyz_cloud);
+
+    TicToc tt;
+    tt.tic ();
+    print_highlight ("Computing ...");
+    poisson.reconstruct (mesh_out);
+
+    print_info ("[Done, "); print_value ("%g", tt.toc ()); print_info (" ms]\n");
+}
+
+
 float
 signedVolumeOfTriangle (pcl::PointXYZ p1, pcl::PointXYZ p2, pcl::PointXYZ p3)
 {
@@ -148,6 +288,7 @@ volumeOfMesh (pcl::PolygonMesh mesh)
         pcl::PointXYZ pt3 = cloud->points[mesh.polygons[triangle].vertices[2]];
         vols = vols + signedVolumeOfTriangle(pt1, pt2, pt3);
     }
+    print_info("ori volume : %f", vols);
     return abs(vols);
 }
 
@@ -226,7 +367,35 @@ main (int argc, char** argv)
     // Command line parsing
     float search_radius = default_search_radius;
     parse_argument (argc, argv, "-search_radius", search_radius);
-    print_info ("Using a search radius of: "); print_value ("%f\n", search_radius);
+    print_info ("Setting search_radius to: "); print_value ("%f\n", search_radius);
+
+    int depth = default_depth;
+    parse_argument (argc, argv, "-depth", depth);
+    print_info ("Setting depth to: "); print_value ("%d\n", depth);
+
+    int solver_divide = default_solver_divide;
+    parse_argument (argc, argv, "-solver_divide", solver_divide);
+    print_info ("Setting solver_divide to: "); print_value ("%d\n", solver_divide);
+
+    int iso_divide = default_iso_divide;
+    parse_argument (argc, argv, "-iso_divide", iso_divide);
+    print_info ("Setting iso_divide to: "); print_value ("%d\n", iso_divide);
+
+    float point_weight = default_point_weight;
+    parse_argument (argc, argv, "-point_weight", point_weight);
+    print_info ("Setting point_weight to: "); print_value ("%f\n", point_weight);
+
+    int search_k = default_search_k;
+    parse_argument (argc, argv, "-search_k", search_k);
+    print_info ("Setting search_k to: "); print_value ("%d\n", search_k);
+
+    float scale = default_scale;
+    parse_argument (argc, argv, "-scale", scale);
+    print_info ("Setting scale to: "); print_value ("%f\n", scale);
+
+    float samples_pernode = default_samples_pernode;
+    parse_argument (argc, argv, "-point_weight", samples_pernode);
+    print_info ("Setting samples_pernode to: "); print_value ("%f\n", samples_pernode);
 
     vector<int> pcd_file_indices;
     pcd_file_indices = parse_file_extension_argument (argc, argv, ".pcd");
@@ -244,6 +413,11 @@ main (int argc, char** argv)
         return (-1);
     }
 
+    bool convex_concave_hull = true;
+    float alpha = default_alpha;
+
+    print_info ("===============================================\n");
+
 
     // Load in the point cloud
     PointCloud<PointXYZ>::Ptr cloud_in (new PointCloud<PointXYZ> ());
@@ -254,9 +428,28 @@ main (int argc, char** argv)
     }
 
     PolygonMesh mesh_out;
+    // PolygonMesh mesh_out2;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_hull (new pcl::PointCloud<pcl::PointXYZ>);
+
+    // concave hull
+    // hull (cloud_in, convex_concave_hull, alpha, cloud_hull);
+    // pcl::PCDWriter writer;
+    // writer.write ("aaa.pcd", *cloud_hull, false);
+    // hull2 (cloud_in, convex_concave_hull, alpha, mesh_out2);
+    // saveVTKFile ("mesh2.vtk", mesh_out2);
+
 
     // fast triangulation
-    triangulate (cloud_in, search_radius, mesh_out);
+    // triangulate (cloud_in, search_radius, search_k, mesh_out);
+
+    // resampling
+    // resampling(cloud_in, search_radius);
+
+    // poisson reconstruction
+    poisson_reconstruction (cloud_in, mesh_out, depth, solver_divide,
+            iso_divide, point_weight, search_k, scale, samples_pernode);
+    // poisson_reconstruction (cloud_hull, mesh_out, depth, solver_divide,
+    //         iso_divide, point_weight, search_k, scale, samples_pernode);
 
     // Save the mesh
     saveVTKFile (argv[vtk_file_indices[0]], mesh_out);
@@ -271,6 +464,15 @@ main (int argc, char** argv)
     area = areaOfMesh(mesh_out);
     print_info ("Total surface area = %f.\n", area);
 
+    // compute volume
+    // float volume2;
+    // volume2 = volumeOfMesh(mesh_out2);
+    // print_info ("Volume of object = %f.\n", volume2);
+
+    // compute area of surface
+    // float area2;
+    // area2 = areaOfMesh(mesh_out2);
+    // print_info ("Total surface area = %f.\n", area2);
 
     return (0);
 }
