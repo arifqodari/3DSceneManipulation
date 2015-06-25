@@ -78,10 +78,8 @@ printHelp (int, char **argv)
     print_info ("  where the optional arguments are:\n");
     print_info ("                     -search_radius X = Search Radius (default: ");
     print_value ("%f", default_search_radius);
-<<<<<<< HEAD
     print_info (")\n")-;
-=======
-    print_info (")\n");
+	print_info (")\n");
     print_info ("                     -depth X          = set the maximum depth of the tree that will be used for surface reconstruction (default: ");
     print_value ("%d", default_depth); print_info (")\n");
     print_info ("                     -solver_divide X  = set the the depth at which a block Gauss-Seidel solver is used to solve the Laplacian equation (default: ");
@@ -145,7 +143,6 @@ hull (PointCloud<PointXYZ>::ConstPtr cloud_in,
         concave_hull.setAlpha (alpha);
         concave_hull.reconstruct (*mesh_out);
     }
->>>>>>> 1751d5227ec7ad592198c6b64add1ff91fa5337d
 }
 
 void
