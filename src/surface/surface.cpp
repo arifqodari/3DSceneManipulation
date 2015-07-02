@@ -1,42 +1,3 @@
-/*
- * Software License Agreement (BSD License)
- *
- *  Point Cloud Library (PCL) - www.pointclouds.org
- *  Copyright (c) 2012-, Open Perception, Inc.
- *
- *  All rights reserved.
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions
- *  are met:
- *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above
- *     copyright notice, this list of conditions and the following
- *     disclaimer in the documentation and/or other materials provided
- *     with the distribution.
- *   * Neither the name of the copyright holder(s) nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- *
- * $Id$
- *
- */
-
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/vtk_io.h>
 #include <pcl/surface/concave_hull.h>
@@ -97,32 +58,6 @@ printHelp (int, char **argv)
 }
 
 void
-resampling (PointCloud<PointXYZ>::ConstPtr cloud_in, float search_radius)
-{
-    // Create a KD-Tree
-    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
-
-    pcl::PointCloud<pcl::PointNormal> mls_points;
-
-    // Init object (second point type is for the normals, even if unused)
-    pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> mls;
-
-    mls.setComputeNormals (true);
-
-    // Set parameters
-    mls.setInputCloud (cloud_in);
-    mls.setPolynomialFit (true);
-    mls.setSearchMethod (tree);
-    mls.setSearchRadius (search_radius);
-
-    // Reconstruct
-    mls.process (mls_points);
-
-    // Save output
-    pcl::io::savePCDFile ("mls.pcd", mls_points);
-}
-
-void
 hull (PointCloud<PointXYZ>::ConstPtr cloud_in,
         bool convex_concave_hull,
         float alpha,
@@ -142,29 +77,6 @@ hull (PointCloud<PointXYZ>::ConstPtr cloud_in,
         concave_hull.setInputCloud (cloud_in);
         concave_hull.setAlpha (alpha);
         concave_hull.reconstruct (*mesh_out);
-    }
-}
-
-void
-hull2 (PointCloud<PointXYZ>::ConstPtr cloud_in,
-        bool convex_concave_hull,
-        float alpha,
-        PolygonMesh &mesh_out)
-{
-    if (!convex_concave_hull)
-    {
-        print_info ("Computing the convex hull of a cloud with %lu points.\n", cloud_in->size ());
-        ConvexHull<PointXYZ> convex_hull;
-        convex_hull.setInputCloud (cloud_in);
-        convex_hull.reconstruct (mesh_out);
-    }
-    else
-    {
-        print_info ("Computing the concave hull (alpha shapes) with alpha %f of a cloud with %lu points.\n", alpha, cloud_in->size ());
-        ConcaveHull<PointXYZ> concave_hull;
-        concave_hull.setInputCloud (cloud_in);
-        concave_hull.setAlpha (alpha);
-        concave_hull.reconstruct (mesh_out);
     }
 }
 
@@ -239,9 +151,6 @@ poisson_reconstruction (const PointCloud<PointXYZ>::ConstPtr input, PolygonMesh 
     pcl::PointCloud<pcl::PointNormal>::Ptr xyz_cloud (new pcl::PointCloud<pcl::PointNormal>);
     pcl::concatenateFields (*input, *normals, *xyz_cloud);
     //* cloud_with_normals = cloud + normals
-
-    // pcl::PCDWriter writer;
-    // writer.write ("aaa.pcd", *xyz_cloud, false);
 
     Poisson<PointNormal> poisson;
     poisson.setDepth (depth);
@@ -320,15 +229,6 @@ areaOfTriangle (pcl::PointXYZ p1, pcl::PointXYZ p2, pcl::PointXYZ p3)
 
     float norm = sqrt(pow(result[0], 2.0) + pow(result[1], 2.0) + pow(result[2], 2.0));
 
-    // print_info ("point 1 %f %f %f\n", p1.x, p1.y, p1.z);
-    // print_info ("point 2 %f %f %f\n", p2.x, p2.y, p2.z);
-    // print_info ("point 3 %f %f %f\n", p3.x, p3.y, p3.z);
-    // print_info ("vector 1 %f %f %f\n", u[0], u[1], u[2]);
-    // print_info ("vector 2 %f %f %f\n", v[0], v[1], v[2]);
-    // print_info ("result %f %f %f\n", result[0], result[1], result[2]);
-    // print_info ("norm %f\n", norm);
-    // print_info ("area %f\n", 0.5 * norm);
-    // print_info ("-------------\n");
     return 0.5 * norm;
 }
 
@@ -429,29 +329,10 @@ main (int argc, char** argv)
     }
 
     PolygonMesh mesh_out;
-    // PolygonMesh mesh_out2;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_hull (new pcl::PointCloud<pcl::PointXYZ>);
-
-    // concave hull
-    // hull (cloud_in, convex_concave_hull, alpha, cloud_hull);
-    // pcl::PCDWriter writer;
-    // writer.write ("aaa.pcd", *cloud_hull, false);
-    // hull2 (cloud_in, convex_concave_hull, alpha, mesh_out2);
-    // saveVTKFile ("mesh2.vtk", mesh_out2);
-
-
-    // fast triangulation
-    // triangulate (cloud_in, search_radius, search_k, mesh_out);
-
-    // resampling
-    // resampling(cloud_in, search_radius);
 
     // poisson reconstruction
     poisson_reconstruction (cloud_in, mesh_out, depth, solver_divide,
             iso_divide, point_weight, search_k, scale, samples_pernode);
-    // poisson_reconstruction (cloud_hull, mesh_out, depth, solver_divide,
-    //         iso_divide, point_weight, search_k, scale, samples_pernode);
-
     // Save the mesh
     saveVTKFile (argv[vtk_file_indices[0]], mesh_out);
 
@@ -464,16 +345,6 @@ main (int argc, char** argv)
     float area;
     area = areaOfMesh(mesh_out);
     print_info ("Total surface area = %f.\n", area);
-
-    // compute volume
-    // float volume2;
-    // volume2 = volumeOfMesh(mesh_out2);
-    // print_info ("Volume of object = %f.\n", volume2);
-
-    // compute area of surface
-    // float area2;
-    // area2 = areaOfMesh(mesh_out2);
-    // print_info ("Total surface area = %f.\n", area2);
 
     return (0);
 }
