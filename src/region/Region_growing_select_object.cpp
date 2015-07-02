@@ -56,6 +56,7 @@
 #include <pcl/console/parse.h>
 
 #include <pcl/io/pcd_io.h>
+#include <pcl/io/vtk_io.h>
 
 #include <pcl/features/integral_image_normal.h>
 #include <pcl/features/normal_3d.h>
@@ -82,9 +83,19 @@
 #include <pcl/point_cloud.h>
 #include <pcl/kdtree/kdtree_flann.h>
 
+#include <pcl/surface/concave_hull.h>
+#include <pcl/surface/convex_hull.h>
+#include <pcl/surface/gp3.h>
+#include <pcl/surface/poisson.h>
+#include <pcl/surface/mls.h>
+
+#include <math.h>
+
 #include <iostream>
 #include <vector>
 #include <ctime>
+
+
 
 using namespace pcl;
 using namespace pcl::console;
@@ -96,146 +107,46 @@ class ObjectSelection
 {
   public:
 	  int clickMode = 0;
+	  bool showSegments = false;
     /////////////////////////////////////////////////////////////////////////
     void keyboard_callback (const visualization::KeyboardEvent& event, void*) {
-		string modeNames[3] = { "Delete", "Color", "Measure" };
+		string modeNames[2] = { "Delete", "Color" };
 		if (event.getKeyCode()) {
-			cout << "the key \'" << event.getKeyCode() << "\' (" << event.getKeyCode() << ") was";
+			//cout << "the key \'" << event.getKeyCode() << "\' (" << event.getKeyCode() << ") was";
 		} else {
-			cout << "the special key \'" << event.getKeySym() << "\' was";
+			//cout << "the special key \'" << event.getKeySym() << "\' was";
 		}
 		if (event.keyDown()) {
-			cout << " pressed" << endl;
+			//cout << " pressed" << endl;
 		} else {
 			if (strcmp ("m", event.getKeySym().c_str()) == 0) {				
-				clickMode = (clickMode + 1) % 3;
-				cout << "Clicks set to: " << modeNames[clickMode] << " Mode.";
+				clickMode = (clickMode + 1) % 2;
+				cout << "Clicks set to: " << modeNames[clickMode] << " Mode." << endl;
 				cloud_viewer_->updateText(modeNames[clickMode] + " Mode", 10, 10, "modeText");
 			}
-			cout << " released" << endl;
+			if (strcmp("c", event.getKeySym().c_str()) == 0) {
+				showSegments = !showSegments;
+				cout << "Show color segment set to: " << showSegments << endl;
+				string segmentText = "False";
+				if (showSegments) {
+					segmentText = "True";
+				}
+				cloud_viewer_->updateText("Show Segments: " + segmentText, 10, 20, "segmentsText");
+			}
+			//cout << " released" << endl;
 		}
 		//delete modeNames;
     }
     
     /////////////////////////////////////////////////////////////////////////
-    void mouse_callback (const visualization::MouseEvent& mouse_event, void*)
-    {
-      if (mouse_event.getType() == visualization::MouseEvent::MouseButtonPress && mouse_event.getButton() == visualization::MouseEvent::LeftButton)
-      {
-        cout << "left button pressed @ " << mouse_event.getX () << " , " << mouse_event.getY () << endl;
-      }
-    }
-
-    /////////////////////////////////////////////////////////////////////////
-    void segment (const PointT &picked_point, 
-             int picked_idx,
-             PlanarRegion<PointT> &region) {
-		// kd-tree object for searches.
-		pcl::search::KdTree<pcl::PointXYZRGB>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZRGB>);
-		kdtree->setInputCloud(cloud_);
-
-		// Color-based region growing clustering object.
-		pcl::RegionGrowingRGB<pcl::PointXYZRGB> clustering;
-		clustering.setInputCloud(cloud_);
-		clustering.setSearchMethod(kdtree);
-		// Here, the minimum cluster size affects also the postprocessing step:
-		// clusters smaller than this will be merged with their neighbors.
-		clustering.setMinClusterSize(400);
-		// Set the distance threshold, to know which points will be considered neighbors.
-		clustering.setDistanceThreshold(10);
-		// Color threshold for comparing the RGB color of two points.
-		clustering.setPointColorThreshold(6);
-		// Region color threshold for the postprocessing step: clusters with colors
-		// within the threshold will be merged in one.
-		clustering.setRegionColorThreshold(10);
-
-		std::vector <pcl::PointIndices> clusters;
-		clustering.extract(clusters);
-
-
-		//pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_segmented(new pcl::PointCloud<pcl::PointXYZRGB>());
-		cloud_ = clustering.getColoredCloud();
-
-		print_highlight("Number of planar regions detected: %lu for a cloud of %lu points\n", clusters.size(), cloud_->size());
-
-		int K = 1;
-		std::vector<int> pointIdxNKNSearch(K);
-		std::vector<float> pointNKNSquaredDistance(K);
-		float smallestDist = 100000;
-		
-		pcl::KdTreeFLANN<pcl::PointXYZRGB> kt;
-		kt.setInputCloud(cloud_);
-		kt.nearestKSearch(picked_point, K, pointIdxNKNSearch, pointNKNSquaredDistance);
-		int counter = 0;
-		
-		
-		pcl::PointCloud<pcl::PointXYZRGB>::Ptr newCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-
-		for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
-		{
-
-			//if (pointNKNSquaredDistance[0] < smallestDist)
-			//{
-//				PCL_INFO("IN SMALLEST");
-			if(std::find(i->indices.begin(), i->indices.end(), pointIdxNKNSearch[0]) == i->indices.end())
-			{
-				pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
-				//typename PointCloud<PointT>::Ptr cloud_;
-				for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
-				{
-					cluster->points.push_back(cloud_->points[*point]);
-				}
-				//smallestDist = pointNKNSquaredDistance[0];
-				cluster->width = cluster->points.size();
-				cluster->height = 1;
-				cluster->is_dense = true;
-
-				*newCloud = (*cluster) + (*newCloud);
-
-
-				//cloud_viewer_->addPointCloud(cluster, std::to_string(counter));
-			}
-		//	counter++;
-		}
-		
-
-		//pcl::PCDWriter writer;
-		//pcl::console::print_highlight("Number of segments done is %lu\n", clusters.size());
-		//writer.write<pcl::PointXYZRGB>("segment_result.pcd", *cluster, false);
-
-		//std::cout << "Cluster " << currentClusterNum << " has " << cluster->points.size() << " points." << std::endl;
-		//std::string fileName = "cluster_test.pcd";
-		//pcl::io::savePCDFileBinary(fileName, *cluster);
-		cloud_viewer_->removePointCloud("scene");
-		cloud_viewer_->addPointCloud(newCloud, "scene");
-		cloud_ = newCloud;
-
-		//counter++;
-		//cloud_viewer_->removePointCloud("scene");
-
-		/*
-		std::vector<int> pointIdxRadiusSearch;
-		std::vector<float> pointRadiusSquaredDistance;
-
-		float radius = 256.0f * rand() / (RAND_MAX + 1.0f);
-
-		std::cout << "Neighbors within radius search at (" << searchPoint.x
-			<< " " << searchPoint.y
-			<< " " << searchPoint.z
-			<< ") with radius=" << radius << std::endl;
-
-
-		if (kdtree.radiusSearch(searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0)
-		{
-			for (size_t i = 0; i < pointIdxRadiusSearch.size(); ++i)
-				std::cout << "    " << cloud->points[pointIdxRadiusSearch[i]].x
-				<< " " << cloud->points[pointIdxRadiusSearch[i]].y
-				<< " " << cloud->points[pointIdxRadiusSearch[i]].z
-				<< " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
-		}*/
-
-    }
-
+    //void mouse_callback (const visualization::MouseEvent& mouse_event, void*)
+    //{
+      //if (mouse_event.getType() == visualization::MouseEvent::MouseButtonPress && mouse_event.getButton() == visualization::MouseEvent::LeftButton)
+      //{
+        //cout << "left button pressed @ " << mouse_event.getX () << " , " << mouse_event.getY () << endl;
+      //}
+    //}
+	
     /////////////////////////////////////////////////////////////////////////
     /** \brief Point picking callback. This gets called when the user selects
       * a 3D point on screen (in the PCLVisualizer window) using Shift+click.
@@ -254,7 +165,6 @@ class ObjectSelection
       // Get the point that was picked
       PointT picked_pt;
       event.getPoint (picked_pt.x, picked_pt.y, picked_pt.z);
-
       print_info (stderr, "Picked point with index %d, and coordinates %f, %f, %f.\n", idx, picked_pt.x, picked_pt.y, picked_pt.z);
 
       // Add a sphere to it in the PCLVisualizer window
@@ -282,45 +192,127 @@ class ObjectSelection
       // Segment the region that we're interested in, by employing a two step process:
       //  * first, segment all the planes in the scene, and find the one closest to our picked point
       //  * then, use euclidean clustering to find the object that we clicked on and return it
-      PlanarRegion<PointT> region;
-      segment (picked_pt, indices[0], region);
-
-      // If no region could be determined, exit
-      if (region.getContour ().empty ())
-      {
-        PCL_ERROR ("No planar region detected. Please select another point or relax the thresholds and continue.\n");
-        return;
-      }
-      // Else, draw it on screen
-      else
-      {
-        cloud_viewer_->addPolygon (region, 0.0, 0.0, 1.0, "region");
-        cloud_viewer_->setShapeRenderingProperties (visualization::PCL_VISUALIZER_LINE_WIDTH, 10, "region");
-
-        // Draw in image space
-        if (image_viewer_)
-        {
-          image_viewer_->addPlanarPolygon (search_->getInputCloud (), region, 0.0, 0.0, 1.0, "refined_region", 1.0);
-        }
-      }
+	  if (clickMode == 1) {
+		  segment(picked_pt, indices[0], true, showSegments);
+	  }
+	  else {
+		  segment(picked_pt, indices[0], false, showSegments);
+	  }
     }
-    
+
+	////////////////////////////////// COLOR START ////////////////////////////////// 
+
+	void alterColor(int* color) {
+		if (*color > 255) {
+			*color = 255;
+		}
+		else if (*color < 0) {
+			*color = 0;
+		}
+	}
+
+	void segment(const PointT &picked_point, int picked_idx, bool color, bool segment) {
+		// kd-tree object for searches.
+		pcl::search::KdTree<pcl::PointXYZRGB>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZRGB>);
+		kdtree->setInputCloud(cloud_);
+
+		// Color-based region growing clustering object.
+		pcl::RegionGrowingRGB<pcl::PointXYZRGB> clustering;
+		clustering.setInputCloud(cloud_);
+		clustering.setSearchMethod(kdtree);
+		// Here, the minimum cluster size affects also the postprocessing step:
+		// clusters smaller than this will be merged with their neighbors.
+		clustering.setMinClusterSize(400);
+		// Set the distance threshold, to know which points will be considered neighbors.
+		clustering.setDistanceThreshold(10);
+		// Color threshold for comparing the RGB color of two points.
+		clustering.setPointColorThreshold(6);
+		// Region color threshold for the postprocessing step: clusters with colors
+		// within the threshold will be merged in one.
+		clustering.setRegionColorThreshold(10);
+
+		std::vector <pcl::PointIndices> clusters;
+		clustering.extract(clusters);
+		//cloud_ = clustering.getColoredCloud();
+		if (segment) {
+			cloud_ = clustering.getColoredCloud();
+		}
+
+		//print_highlight("Number of planar regions detected: %lu for a cloud of %lu points\n", clusters.size(), cloud_->size());
+		int K = 1;
+		std::vector<int> pointIdxNKNSearch(K);
+		std::vector<float> pointNKNSquaredDistance(K);
+
+		pcl::KdTreeFLANN<pcl::PointXYZRGB> kt;
+		kt.setInputCloud(cloud_);
+		kt.nearestKSearch(picked_point, K, pointIdxNKNSearch, pointNKNSquaredDistance);
+
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr newCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+		for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
+		{
+			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+			if (std::find(i->indices.begin(), i->indices.end(), pointIdxNKNSearch[0]) == i->indices.end())
+			{
+				for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
+				{
+					cluster->points.push_back(cloud_->points[*point]);
+				}
+				cluster->width = cluster->points.size();
+				cluster->height = 1;
+				cluster->is_dense = true;
+
+				*newCloud = (*cluster) + (*newCloud);
+			}
+			else if (color)
+			{
+				//pcl::PointXYZRGB refPoint = picked_point;
+
+				for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
+				{
+					int rDifference = picked_point.r - cloud_->points[*point].r;
+					int gDifference = picked_point.g - cloud_->points[*point].g;
+					int bDifference = picked_point.b - cloud_->points[*point].b;
+
+					int rNew = 250 - rDifference;
+					int gNew = 15 - gDifference;
+					int bNew = 15 - bDifference;
+
+					alterColor(&rNew);
+					alterColor(&gNew);
+					alterColor(&bNew);
+
+					cloud_->points[*point].r = rNew;
+					cloud_->points[*point].g = gNew;
+					cloud_->points[*point].b = bNew;
+
+					cluster->points.push_back(cloud_->points[*point]);
+				}
+
+				cluster->width = cluster->points.size();
+				cluster->height = 1;
+				cluster->is_dense = true;
+
+				*newCloud = (*cluster) + (*newCloud);
+			}
+		}
+
+		cloud_viewer_->removePointCloud("scene");
+		cloud_viewer_->addPointCloud(newCloud, "scene");
+		cloud_ = newCloud;
+
+	}
+
+	///////////////////////////////// COLOR END ////////////////////////////////// 
+
+
     /////////////////////////////////////////////////////////////////////////
     void compute () {
       // Visualize the data
-      while (!cloud_viewer_->wasStopped ())
-      {
-        /*// Add the plane that we're tracking to the cloud visualizer
-        PointCloud<PointT>::Ptr plane (new Cloud);
-        if (plane_)
-          *plane = *plane_;
-        visualization::PointCloudColorHandlerCustom<PointT> blue (plane, 0, 255, 0);
-        if (!cloud_viewer_->updatePointCloud (plane, blue, "plane"))
-          cloud_viewer_->addPointCloud (plane, "plane");
-*/
+      while (!cloud_viewer_->wasStopped ()) {
         cloud_viewer_->spinOnce ();
-        if (image_viewer_)
-        {
+        if (image_viewer_) {
           image_viewer_->spinOnce ();
           if (image_viewer_->wasStopped ())
             break;
@@ -333,7 +325,7 @@ class ObjectSelection
     void initGUI () {
       cloud_viewer_.reset (new visualization::PCLVisualizer ("PointCloud"));
 
-      cloud_viewer_->registerMouseCallback (&ObjectSelection::mouse_callback, *this);
+      //cloud_viewer_->registerMouseCallback (&ObjectSelection::mouse_callback, *this);
       cloud_viewer_->registerKeyboardCallback(&ObjectSelection::keyboard_callback, *this);
       cloud_viewer_->registerPointPickingCallback (&ObjectSelection::pp_callback, *this);
       cloud_viewer_->setPosition (0, 0);
@@ -342,6 +334,7 @@ class ObjectSelection
       cloud_viewer_->resetCameraViewpoint ("scene");
       cloud_viewer_->addCoordinateSystem (0.1, 0, 0, 0, "global");
 	  cloud_viewer_->addText("Delete Mode", 10, 10, "modeText");
+	  cloud_viewer_->addText("Show Segments: False", 10, 20, "segmentsText");
     }
 
     /////////////////////////////////////////////////////////////////////////
@@ -351,8 +344,7 @@ class ObjectSelection
       print_highlight (stderr, "Loading "); 
       print_value (stderr, "%s ", file.c_str ());
       cloud_.reset (new PointCloud<PointT>);
-      if (io::loadPCDFile (file, *cloud_) < 0) 
-      {
+      if (io::loadPCDFile (file, *cloud_) < 0) {
         print_error (stderr, "[error]\n");
         return (false);
       }
